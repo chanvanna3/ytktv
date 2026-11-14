@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+*/node_modules/
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/
+
+# Environment and sensitive keys
+.env
+.env.local
+.env.*.local
+*.env
+
+# Large generated outputs / Audio stems
+backend/output/
+output/
+*.wav
+*.mp3
+*.mp4
+*.m4a
+*.webm
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+
+# Logs & temp
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.system_generated/
+.DS_Store
+Thumbs.db

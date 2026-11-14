@@ -1,0 +1,8 @@
+# Robots.txt for YouTube AI Karaoke Studio (Prod by Sombokrean)
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /media/
+
+# Sitemap location
+Sitemap: https://www.sombokrean.com/sitemap.xml

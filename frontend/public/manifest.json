@@ -1,0 +1,19 @@
+{
+  "name": "YouTube AI Karaoke Studio",
+  "short_name": "AI Karaoke",
+  "description": "កម្មវិធីខារ៉ាអូខេ AI ដំបូងគេនៅកម្ពុជា - កាត់សំឡេងច្រៀងចេញពី YouTube (95%+ Vocal Cut), រត់អក្សរខារ៉ាអូខេ & Live Mic Studio។ ផលិតដោយ សំបុករៀន (Sombokrean)។",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#070b19",
+  "theme_color": "#070b19",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo.webp",
+      "sizes": "192x192 512x512",
+      "type": "image/webp",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["music", "entertainment", "multimedia"]
+}

@@ -1,0 +1,203 @@
+@import url('https://fonts.googleapis.com/css2?family=Kantumruy+Pro:ital,wght@0,100..700;1,100..700&family=JetBrains+Mono:wght@400;600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Local Kantumruy Pro Font Faces (Guaranteed to load offline & without CDN restrictions) */
+@font-face {
+  font-family: 'Kantumruy Pro';
+  font-style: normal;
+  font-weight: 300;
+  font-display: swap;
+  src: url('/fonts/kantumruy-pro-300.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Kantumruy Pro';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/kantumruy-pro-400.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Kantumruy Pro';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url('/fonts/kantumruy-pro-500.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Kantumruy Pro';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/kantumruy-pro-600.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Kantumruy Pro';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/kantumruy-pro-700.ttf') format('truetype');
+}
+
+:root {
+  font-family: 'Kantumruy Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+html, body, #root {
+  font-family: 'Kantumruy Pro', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+}
+
+*, ::before, ::after {
+  font-family: 'Kantumruy Pro', sans-serif;
+}
+
+input, button, textarea, select, h1, h2, h3, h4, h5, h6, p, span, a, label {
+  font-family: 'Kantumruy Pro', sans-serif !important;
+}
+
+code, kbd, samp, pre, .font-mono {
+  font-family: 'JetBrains Mono', monospace !important;
+}
+
+/* Custom modern scrollbars */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b0f19;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f293d;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+
+/* Glowing text and glass effects */
+.glow-pink {
+  text-shadow: 0 0 12px rgba(236, 72, 153, 0.6);
+}
+
+.glow-cyan {
+  text-shadow: 0 0 12px rgba(6, 182, 212, 0.6);
+}
+
+.glass-panel {
+  background: rgba(18, 24, 38, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* ==========================================================================
+   Cyberpunk Neon HUD Search Box Styles (Matching User Reference Image)
+   ========================================================================== */
+
+@keyframes pulse-flame {
+  0%, 100% {
+    filter: drop-shadow(0 0 16px rgba(244, 63, 94, 0.85)) drop-shadow(0 0 32px rgba(236, 72, 153, 0.55));
+    transform: scale(1);
+  }
+  50% {
+    filter: drop-shadow(0 0 28px rgba(244, 63, 94, 1)) drop-shadow(0 0 50px rgba(251, 146, 60, 0.8));
+    transform: scale(1.01);
+  }
+}
+
+@keyframes rotate-radar {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes rotate-radar-reverse {
+  from {
+    transform: rotate(360deg);
+  }
+  to {
+    transform: rotate(0deg);
+  }
+}
+
+@keyframes radar-ping {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.2);
+    opacity: 0.3;
+  }
+  100% {
+    transform: scale(0.9);
+    opacity: 0.9;
+  }
+}
+
+@keyframes soundwave-pulse {
+  0%, 100% {
+    opacity: 0.5;
+    transform: scaleY(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scaleY(1.15);
+  }
+}
+
+.cyber-flame-glow {
+  animation: pulse-flame 2.5s infinite ease-in-out;
+}
+
+.cyber-radar-spin {
+  animation: rotate-radar 14s linear infinite;
+}
+
+.cyber-radar-spin-rev {
+  animation: rotate-radar-reverse 20s linear infinite;
+}
+
+.cyber-radar-ping {
+  animation: radar-ping 2.5s ease-in-out infinite;
+}
+
+.cyber-wave-anim {
+  animation: soundwave-pulse 1.8s ease-in-out infinite alternate;
+}
+
+/* 3D Cyber Perspective Grid Floor */
+.cyber-grid-floor {
+  background-image: 
+    linear-gradient(to right, rgba(6, 182, 212, 0.28) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(6, 182, 212, 0.28) 1px, transparent 1px);
+  background-size: 24px 18px;
+  mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.6) 50%, rgba(0,0,0,0) 100%);
+  -webkit-mask-image: linear-gradient(to top, rgba(0,0,0,1) 0%, rgba(0,0,0,0.6) 50%, rgba(0,0,0,0) 100%);
+}
+
+/* Cyber chamfered cut corners */
+.cyber-chamfer-pill {
+  clip-path: polygon(14px 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 14px 100%, 0 50%);
+}
+
+.cyber-chamfer-btn {
+  clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+}
+
+.cyber-chamfer-tab {
+  clip-path: polygon(10px 0, calc(100% - 10px) 0, 100% 10px, 100% calc(100% - 10px), calc(100% - 10px) 100%, 10px 100%, 0 calc(100% - 10px), 0 10px);
+}
