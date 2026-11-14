@@ -18,6 +18,7 @@ import {
   TrendingUp,
 } from 'lucide-react';
 import { extractVideoId } from '../utils/youtube';
+import { apiUrl } from '../utils/api';
 
 // Helper component for mini audio soundwaves embedded in buttons/pills
 function MiniSoundwave({ colorClass = 'text-pink-400' }) {
@@ -106,7 +107,7 @@ export function SearchAndInput({ onSelectVideo, isProcessing, externalQuery }) {
   // Fetch history & trending from backend server (syncs across different browsers)
   const fetchServerHistory = useCallback(async () => {
     try {
-      const res = await fetch('/api/history');
+      const res = await fetch(apiUrl('/api/history'));
       if (res.ok) {
         const data = await res.json();
         if (data.history && Array.isArray(data.history)) {
@@ -175,7 +176,7 @@ export function SearchAndInput({ onSelectVideo, isProcessing, externalQuery }) {
 
     // 2. Server Sync across different browsers
     try {
-      const res = await fetch('/api/history', {
+      const res = await fetch(apiUrl('/api/history'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ video_id: id, title: cleanTitle }),
@@ -201,7 +202,7 @@ export function SearchAndInput({ onSelectVideo, isProcessing, externalQuery }) {
     });
 
     try {
-      await fetch(`/api/history/${id}`, { method: 'DELETE' });
+      await fetch(apiUrl(`/api/history/${id}`), { method: 'DELETE' });
     } catch (err) {}
   };
 
@@ -211,7 +212,7 @@ export function SearchAndInput({ onSelectVideo, isProcessing, externalQuery }) {
     setServerTrending([]);
     try {
       localStorage.removeItem('karaoke_singing_history');
-      await fetch('/api/history', { method: 'DELETE' });
+      await fetch(apiUrl('/api/history'), { method: 'DELETE' });
     } catch (err) {}
   };
 
@@ -305,7 +306,7 @@ export function SearchAndInput({ onSelectVideo, isProcessing, externalQuery }) {
     setSearchResults([]);
 
     try {
-      const response = await fetch(`/api/search?q=${encodeURIComponent(query.trim())}`);
+      const response = await fetch(apiUrl(`/api/search?q=${encodeURIComponent(query.trim())}`));
       if (!response.ok) {
         throw new Error(`Search failed (${response.status})`);
       }

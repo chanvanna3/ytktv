@@ -1,0 +1,4 @@
+# Ignore heavy backend AI Python dependencies from Vercel Serverless
+backend/
+Dockerfile
+.venv/

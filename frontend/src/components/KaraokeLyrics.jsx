@@ -18,6 +18,7 @@ import {
   ClipboardPaste,
 } from 'lucide-react';
 import { formatTime } from '../utils/youtube';
+import { apiUrl } from '../utils/api';
 
 // Helper to detect if a text represents an instrumental interlude / music notes
 const isMusicInterludeText = (text) => {
@@ -122,7 +123,7 @@ export function KaraokeLyrics({
     const fetchLyrics = async () => {
       setIsLoading(true);
       try {
-        const res = await fetch(`/api/lyrics/${videoId}?lang=${selectedLang}`);
+        const res = await fetch(apiUrl(`/api/lyrics/${videoId}?lang=${selectedLang}`));
         if (!res.ok) throw new Error(`Lyrics fetch failed (${res.status})`);
         const data = await res.json();
 
@@ -254,7 +255,7 @@ export function KaraokeLyrics({
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/lyrics/${videoId}`);
+      const res = await fetch(apiUrl(`/api/lyrics/${videoId}`));
       const data = await res.json();
       if (data.status === 'success' && data.lyrics) {
         setLyrics(data.lyrics);
@@ -286,7 +287,7 @@ export function KaraokeLyrics({
     setIsSavingLyrics(true);
     setModalStatusMsg(null);
     try {
-      const res = await fetch(`/api/lyrics/${videoId}`, {
+      const res = await fetch(apiUrl(`/api/lyrics/${videoId}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ raw_text: rawTextInput.trim() }),
@@ -316,7 +317,7 @@ export function KaraokeLyrics({
       text: `AI Whisper កំពុងស្តាប់សំឡេងច្រៀង និង Transcribe ជា ${langLabel} (សូមរង់ចាំបន្តិច)...`,
     });
     try {
-      const res = await fetch(`/api/lyrics/${videoId}`, {
+      const res = await fetch(apiUrl(`/api/lyrics/${videoId}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force_whisper: true, language: lang }),
@@ -345,7 +346,7 @@ export function KaraokeLyrics({
     if (!videoId) return;
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/lyrics/${videoId}`, {
+      const res = await fetch(apiUrl(`/api/lyrics/${videoId}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ force_whisper: true, language: newLang }),

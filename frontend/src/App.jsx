@@ -35,6 +35,7 @@ import { KaraokePlayer } from './components/KaraokePlayer';
 import { KaraokeControls } from './components/KaraokeControls';
 import { KaraokeLyrics } from './components/KaraokeLyrics';
 import { ProcessingModal } from './components/ProcessingModal';
+import { apiUrl } from './utils/api';
 
 export function App() {
   const [selectedVideoId, setSelectedVideoId] = useState(null);
@@ -272,7 +273,7 @@ export function App() {
     }, 150);
 
     try {
-      const response = await fetch('/api/process', {
+      const response = await fetch(apiUrl('/api/process'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ video_id: videoId }),
@@ -291,8 +292,8 @@ export function App() {
         setProcessingProgress(100);
         setProcessingStage('completed');
         setStems({
-          instrumentalUrl: initialData.instrumental_url,
-          vocalsUrl: initialData.vocals_url,
+          instrumentalUrl: apiUrl(initialData.instrumental_url),
+          vocalsUrl: apiUrl(initialData.vocals_url),
         });
         setIsVocalOn(false); // Default: Lead Vocals Muted (Pure Instrumental)
         setIsProcessing(false);
@@ -302,13 +303,13 @@ export function App() {
       // Case B: Background separation job in progress -> Poll /api/status/{videoId} every 1.5s
       pollingTimerRef.current = setInterval(async () => {
         try {
-          const pollRes = await fetch(`/api/status/${videoId}`);
+          const pollRes = await fetch(apiUrl(`/api/status/${videoId}`));
           if (!pollRes.ok) return;
 
           const pollData = await pollRes.json();
 
           if (pollData.direct_audio_url) {
-            directAudioUrlRef.current = pollData.direct_audio_url;
+            directAudioUrlRef.current = apiUrl(pollData.direct_audio_url);
           }
           if (pollData.progress) {
             setProcessingProgress(pollData.progress);
@@ -342,8 +343,8 @@ export function App() {
             setProcessingStage('completed');
 
             setStems({
-              instrumentalUrl: pollData.instrumental_url,
-              vocalsUrl: pollData.vocals_url,
+              instrumentalUrl: apiUrl(pollData.instrumental_url),
+              vocalsUrl: apiUrl(pollData.vocals_url),
             });
             setIsVocalOn(false); // Pure instrumental karaoke!
             setIsProcessing(false); // Dismiss overlay modal and auto-start
@@ -379,11 +380,11 @@ export function App() {
     if (!audioUrl && selectedVideoId) {
       for (let i = 0; i < 20; i++) {
         try {
-          const res = await fetch(`/api/status/${selectedVideoId}`);
+          const res = await fetch(apiUrl(`/api/status/${selectedVideoId}`));
           if (res.ok) {
             const data = await res.json();
             if (data.direct_audio_url) {
-              audioUrl = data.direct_audio_url;
+              audioUrl = apiUrl(data.direct_audio_url);
               directAudioUrlRef.current = audioUrl;
               break;
             }
