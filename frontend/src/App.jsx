@@ -25,16 +25,19 @@ import {
   X,
   Zap,
   ShieldCheck,
+  Headphones,
 } from 'lucide-react';
 import { useYouTubePlayer } from './hooks/useYouTubePlayer';
 import { useAudioSync } from './hooks/useAudioSync';
 import { useLiveMicrophone } from './hooks/useLiveMicrophone';
+import { useVoiceStudioPro } from './hooks/useVoiceStudioPro';
 import { useKaraokeStudio } from './hooks/useKaraokeStudio';
 import { SearchAndInput } from './components/SearchAndInput';
 import { KaraokePlayer } from './components/KaraokePlayer';
 import { KaraokeControls } from './components/KaraokeControls';
 import { KaraokeLyrics } from './components/KaraokeLyrics';
 import { ProcessingModal } from './components/ProcessingModal';
+import { KtvVoiceStudioPro } from './components/KtvVoiceStudioPro';
 import { apiUrl } from './utils/api';
 
 export function App() {
@@ -51,6 +54,7 @@ export function App() {
   const [playbackRate, setPlaybackRateState] = useState(1.0);
   const [isInstantCutLoading, setIsInstantCutLoading] = useState(false);
   const [externalSearchQuery, setExternalSearchQuery] = useState('');
+  const [isVoiceStudioOpen, setIsVoiceStudioOpen] = useState(false);
 
   // References
   const searchSectionRef = useRef(null);
@@ -164,10 +168,7 @@ export function App() {
     }
   }, []);
 
-  // 1. Live Microphone Engine Hook (Sing live with reverb/echo)
-  const micEngine = useLiveMicrophone();
-
-  // 2. YouTube IFrame Player wrapper hook (Strictly permanently muted)
+  // 1. YouTube IFrame Player wrapper hook (Strictly permanently muted)
   const {
     playerRef,
     containerId,
@@ -183,8 +184,10 @@ export function App() {
     onStateChange: onYTStateChange,
   });
 
-  // 3. Synchronized audio tracks engine hook (HT-Demucs FT dual tracks)
+  // 2. Synchronized audio tracks engine hook (HT-Demucs FT dual tracks)
   const {
+    audioMode,
+    setAudioMode,
     isVocalOn,
     setIsVocalOn,
     toggleVocals,
@@ -205,6 +208,11 @@ export function App() {
     vocalsUrl: stems.vocalsUrl,
     playerRef: playerRef,
     isPlayerReady: isPlayerReady,
+  });
+
+  // 3. KTV Voice Studio PRO Hook (Live Mic, Auto-Tune, 3-Band EQ, Reverb & Echo)
+  const micEngine = useVoiceStudioPro({
+    karaokeAudioElement: instAudioElement,
   });
 
   const handleSeek = useCallback((seconds) => {
@@ -352,7 +360,23 @@ export function App() {
             clearInterval(pollingTimerRef.current);
             pollingTimerRef.current = null;
             setIsProcessing(false);
-            setApiError(pollData.error || 'ការបំបែកភ្លេងបរាជ័យ។ សូមសាកល្បងម្តងទៀត។');
+            // Notice: If YouTube flagged the datacenter IP, inform user clearly
+            console.warn('Backend separation notice, falling back to direct YouTube playback:', pollData.error);
+            if (pollData.error && (pollData.error.includes('bot') || pollData.error.includes('Sign in'))) {
+              setApiError('YouTube Bot Notice: YouTube តម្រូវឱ្យផ្ទៀងផ្ទាត់ Bot លើ Cloud Server Render សម្រាប់បទនេះ។ កំពុងប្តូរទៅចាក់តាម YouTube ផ្ទាល់។');
+            } else {
+              setApiError(null);
+            }
+            setTimeout(() => {
+              const player = playerRef.current;
+              if (player && typeof player.unMute === 'function') {
+                try {
+                  player.unMute();
+                  player.setVolume(100);
+                  player.playVideo();
+                } catch (e) {}
+              }
+            }, 300);
           }
         } catch (e) {
           console.warn('Polling error:', e);
@@ -360,57 +384,76 @@ export function App() {
       }, 1500);
 
     } catch (err) {
-      console.error('Failed to trigger video processing:', err);
-      setApiError(err.message || 'Failed to trigger audio processing.');
+      console.warn('Failed to trigger video processing, falling back to direct YouTube playback:', err);
       setIsProcessing(false);
+      setApiError(null);
+      setTimeout(() => {
+        const player = playerRef.current;
+        if (player && typeof player.unMute === 'function') {
+          try {
+            player.unMute();
+            player.setVolume(100);
+            player.playVideo();
+          } catch (e) {}
+        }
+      }, 300);
     }
   };
 
-  // Instant Auto Vocal Cut: Play immediately without waiting for AI separation
+  // Auto Vocal Cut / Ready to Sing with True Demucs Instrumental
   const handleStartInstantAutoVocalCut = useCallback(async () => {
+    if (!selectedVideoId) return;
     setIsInstantCutLoading(true);
 
-    let audioUrl = directAudioUrlRef.current;
-    // Strict safety check: Discard URL if it does not belong to currently selected video!
-    if (audioUrl && selectedVideoId && !audioUrl.includes(selectedVideoId)) {
-      audioUrl = null;
-    }
-
-    // If audio is not yet ready, poll up to 20 times (~10 seconds)
-    if (!audioUrl && selectedVideoId) {
-      for (let i = 0; i < 20; i++) {
-        try {
-          const res = await fetch(apiUrl(`/api/status/${selectedVideoId}`));
-          if (res.ok) {
-            const data = await res.json();
-            if (data.direct_audio_url) {
-              audioUrl = apiUrl(data.direct_audio_url);
-              directAudioUrlRef.current = audioUrl;
-              break;
-            }
-          }
-        } catch (e) {}
-        await new Promise((resolve) => setTimeout(resolve, 500));
+    try {
+      const res = await fetch(apiUrl(`/api/status/${selectedVideoId}`));
+      if (res.ok) {
+        const data = await res.json();
+        if (data.instrumental_url) {
+          setStems({
+            instrumentalUrl: apiUrl(data.instrumental_url),
+            vocalsUrl: data.vocals_url ? apiUrl(data.vocals_url) : null,
+          });
+          setIsVocalOn(false);
+          setAudioMode('instrumental');
+          setIsInstantCutLoading(false);
+          setIsProcessing(false);
+          playVideo();
+          return;
+        }
       }
-    }
+    } catch (e) {}
 
-    if (!audioUrl && selectedVideoId) {
-      audioUrl = `/media/${selectedVideoId}/audio.wav`;
-    }
+    // If Demucs separation is still running, poll dynamically until instrumental is ready
+    let attempts = 0;
+    const pollInterval = setInterval(async () => {
+      attempts++;
+      try {
+        const res = await fetch(apiUrl(`/api/status/${selectedVideoId}`));
+        if (res.ok) {
+          const data = await res.json();
+          if (data.instrumental_url) {
+            clearInterval(pollInterval);
+            setIsInstantCutLoading(false);
+            setStems({
+              instrumentalUrl: apiUrl(data.instrumental_url),
+              vocalsUrl: data.vocals_url ? apiUrl(data.vocals_url) : null,
+            });
+            setIsVocalOn(false);
+            setAudioMode('instrumental');
+            setIsProcessing(false);
+            playVideo();
+            return;
+          }
+        }
+      } catch (e) {}
 
-    setIsInstantCutLoading(false);
-
-    if (audioUrl) {
-      setStems({
-        instrumentalUrl: audioUrl,
-        vocalsUrl: null,
-      });
-      studioEngine.setAutoVocalCut(true);
-      setIsVocalOn(false);
-      setIsProcessing(false);
-      playVideo();
-    }
-  }, [selectedVideoId, studioEngine, playVideo]);
+      if (attempts >= 25) {
+        clearInterval(pollInterval);
+        setIsInstantCutLoading(false);
+      }
+    }, 1000);
+  }, [selectedVideoId, playVideo, setAudioMode, setIsVocalOn]);
 
   const isPlaying = playerState === 1; // 1 = YT.PlayerState.PLAYING
 
@@ -444,6 +487,19 @@ export function App() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* KTV Voice Studio PRO Header Button */}
+            <button
+              onClick={() => setIsVoiceStudioOpen(true)}
+              className="flex items-center gap-1.5 px-3 sm:px-3.5 py-1.5 rounded-xl font-bold text-xs bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white shadow-lg shadow-purple-500/25 border border-purple-400/40 cursor-pointer transition-all hover:scale-105 active:scale-95"
+              title="បើកផ្ទាំង KTV Voice Studio PRO (Auto-Tune & Voice FX)"
+            >
+              <Mic className="w-3.5 h-3.5 text-white animate-pulse" />
+              <span>Voice Studio PRO</span>
+              <span className="px-1.5 py-0.2 rounded-full text-[9px] bg-white/20 font-mono tracking-wider font-extrabold hidden md:inline">
+                AUTO-TUNE
+              </span>
+            </button>
+
             <span className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-mono bg-slate-800/80 border border-slate-700 text-slate-300">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
               AI Model: HT-Demucs FT
@@ -689,8 +745,13 @@ export function App() {
                     layerTitle = '🎛️ ការកំណត់សំឡេង & អេកូ (Audio Studio Rack)';
                     layerIcon = <SlidersHorizontal className="w-4 h-4 text-purple-400" />;
                     layerContent = (
-                      <div className="hidden sm:block">
+                      <div className="w-full">
                         <KaraokeControls
+                          audioMode={audioMode}
+                          setAudioMode={setAudioMode}
+                          selectedVideoId={selectedVideoId}
+                          videoTitle={videoTitle}
+                          stems={stems}
                           isVocalOn={isVocalOn}
                           toggleVocals={toggleVocals}
                           instVolume={instVolume}
@@ -703,8 +764,8 @@ export function App() {
                           audioLoaded={audioLoaded}
                           playbackRate={playbackRate}
                           onChangePlaybackRate={handleChangePlaybackRate}
-                          isAutoVocalCutActive={studioEngine.isAutoVocalCutActive}
-                          toggleAutoVocalCut={studioEngine.toggleAutoVocalCut}
+                          isAutoVocalCutActive={!isVocalOn}
+                          toggleAutoVocalCut={toggleVocals}
                           isDeBleedActive={studioEngine.isDeBleedActive}
                           toggleDeBleed={studioEngine.toggleDeBleed}
                           isRecording={studioEngine.isRecording}
@@ -724,6 +785,16 @@ export function App() {
                           setDelayTime={micEngine.setDelayTime}
                           setEchoPreset={micEngine.setEchoPreset}
                           micError={micEngine.micError}
+                          setMicBoostPreset={micEngine.setMicBoostPreset}
+                          isHeadphonesConnected={micEngine.isHeadphonesConnected}
+                          toggleHeadphones={micEngine.toggleHeadphones}
+                          isMonitorSpeaker={micEngine.isMonitorSpeaker}
+                          setIsMonitorSpeaker={micEngine.setIsMonitorSpeaker}
+                          isNoiseCutActive={micEngine.isNoiseCutActive}
+                          toggleNoiseCut={micEngine.toggleNoiseCut}
+                          keepMusicNormal={micEngine.keepMusicNormal}
+                          toggleKeepMusicNormal={micEngine.toggleKeepMusicNormal}
+                          onOpenVoiceStudio={() => setIsVoiceStudioOpen(true)}
                         />
                       </div>
                     );
@@ -805,6 +876,21 @@ export function App() {
       {/* Mobile Floating Quick Action Dock (សម្រាប់បទពិសោធន៍ Mobile App ដូច Smule / WeSing) */}
       {selectedVideoId && (
         <div className="sm:hidden fixed bottom-3 left-3 right-3 z-40 rounded-2xl bg-slate-950/95 backdrop-blur-xl border border-pink-500/40 p-2 shadow-2xl flex items-center justify-around shadow-pink-500/10 animate-fade-in">
+          {/* Headphone Mode Quick Button */}
+          <button
+            type="button"
+            onClick={() => micEngine.toggleHeadphones()}
+            className={`p-2 rounded-xl flex flex-col items-center gap-0.5 text-[10px] font-bold cursor-pointer transition-all ${
+              micEngine.isHeadphonesConnected
+                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-500/30'
+                : 'text-amber-400 hover:text-amber-300'
+            }`}
+            title="ដោតកាសដើម្បីច្រៀងលឺសំឡេងតាម Mic & ភ្លេង"
+          >
+            <Headphones className={`w-4 h-4 ${micEngine.isHeadphonesConnected ? 'animate-pulse' : ''}`} />
+            <span>{micEngine.isHeadphonesConnected ? 'កាស ON' : 'ដោតកាស'}</span>
+          </button>
+
           {/* Mic Button */}
           <button
             type="button"
@@ -943,6 +1029,43 @@ export function App() {
             {/* Drawer Tab 1: Voice & Mic Setting */}
             {mobileDrawerTab === 'voice' && (
               <div className="space-y-4 animate-fade-in">
+                {/* Headphone Karaoke Monitor Card */}
+                <div className={`p-3.5 rounded-2xl border transition-all ${
+                  micEngine.isHeadphonesConnected
+                    ? 'bg-emerald-950/60 border-emerald-500/60 shadow-lg shadow-emerald-500/10'
+                    : 'bg-amber-950/40 border-amber-500/50'
+                }`}>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div className="flex items-center gap-2">
+                      <Headphones className={`w-5 h-5 ${micEngine.isHeadphonesConnected ? 'text-emerald-400 animate-pulse' : 'text-amber-400'}`} />
+                      <div>
+                        <h4 className="text-xs font-bold text-white">
+                          {micEngine.isHeadphonesConnected ? 'កាសសកម្ម (Headphones Ready)' : 'តម្រូវឱ្យប្រើកាស (Headphones)'}
+                        </h4>
+                        <span className="text-[10px] text-slate-300">
+                          {micEngine.isHeadphonesConnected ? 'សំឡេង Mic & ភ្លេងរត់ចូលកាសជាមួយគ្នា' : 'ការពារសំឡេងខ្ទរ Echo លើទូរស័ព្ទ'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => micEngine.toggleHeadphones()}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${
+                        micEngine.isHeadphonesConnected
+                          ? 'bg-emerald-600 text-white shadow-md'
+                          : 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold shadow-md'
+                      }`}
+                    >
+                      {micEngine.isHeadphonesConnected ? '🎧 កាស ON' : '🎧 ដោតកាសហើយ'}
+                    </button>
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    {micEngine.isHeadphonesConnected
+                      ? '✨ លោកអ្នកអាចច្រៀងលឺសំឡេងខ្លួនឯងតាម Mic បូករួមទាំងភ្លេងរត់ចូលកាសស្របគ្នា 100% ដូចក្នុងបន្ទប់ខារ៉ាអូខេ KTV!'
+                      : '💡 ដើម្បីច្រៀងលឺសំឡេងខ្លួនឯងតាម Mic សូមដោតកាសទូរស័ព្ទ រួចចុចប៊ូតុង "ដោតកាសហើយ" ដើម្បីបើក Mic & កាស។'}
+                  </p>
+                </div>
+
                 {/* Vocal Toggle */}
                 <button
                   onClick={toggleVocals}
@@ -982,24 +1105,144 @@ export function App() {
                   <button onClick={() => setVocalVolume(1)} className="p-1.5 rounded-lg bg-slate-800 text-[10px] text-slate-300 font-mono text-center">100%</button>
                 </div>
 
-                {/* Mic Gain Slider */}
-                <div className="space-y-1.5 pt-2 border-t border-slate-800">
+                {/* Mic Gain Slider & Studio Vocal Booster */}
+                <div className="space-y-2 pt-2 border-t border-slate-800">
                   <div className="flex items-center justify-between text-xs text-slate-300">
                     <span className="flex items-center gap-1.5">
                       <Mic className="w-3.5 h-3.5 text-rose-400" />
-                      <span>កម្រិតសំឡេងម៉ៃក្រូហ្វូន (Mic Gain):</span>
+                      <span className="font-semibold">កម្រិតសំឡេងម៉ៃក្រូហ្វូន (Mic Boost):</span>
                     </span>
-                    <span className="font-mono text-rose-400 font-bold">{Math.round(micEngine.micVolume * 100)}%</span>
+                    <span className="font-mono text-rose-400 font-bold text-xs">{Math.round(micEngine.micVolume * 100)}%</span>
                   </div>
                   <input
                     type="range"
                     min="0"
-                    max="1.5"
+                    max="3.0"
                     step="0.05"
                     value={micEngine.micVolume}
                     onChange={(e) => micEngine.setMicVolume(parseFloat(e.target.value))}
                     className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-rose-500"
                   />
+
+                  {/* Quick Vocal Boost Presets for Mobile */}
+                  <div className="grid grid-cols-3 gap-1.5 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => micEngine.setMicBoostPreset('normal')}
+                      className={`py-1.5 rounded-lg text-[11px] font-mono cursor-pointer transition-all ${
+                        Math.round(micEngine.micVolume * 100) === 100
+                          ? 'bg-rose-950 border border-rose-500 text-rose-300 font-bold'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                      }`}
+                    >
+                      100% ធម្មតា
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => micEngine.setMicBoostPreset('full')}
+                      className={`py-1.5 rounded-lg text-[11px] font-mono cursor-pointer transition-all ${
+                        Math.round(micEngine.micVolume * 100) === 180
+                          ? 'bg-rose-950 border border-rose-500 text-rose-300 font-bold'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                      }`}
+                    >
+                      180% សំឡេងពេញ
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => micEngine.setMicBoostPreset('boost')}
+                      className={`py-1.5 rounded-lg text-[11px] font-mono cursor-pointer transition-all ${
+                        Math.round(micEngine.micVolume * 100) === 250
+                          ? 'bg-rose-950 border border-rose-500 text-rose-300 font-bold'
+                          : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                      }`}
+                    >
+                      250% បំពងខ្លាំង
+                    </button>
+                  </div>
+
+                  {/* Anti-Noise & Hiss Filter Toggle for Mobile */}
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800 mt-2">
+                    <div className="flex items-center gap-2">
+                      <ShieldCheck className={`w-4 h-4 ${micEngine.isNoiseCutActive ? 'text-emerald-400' : 'text-slate-500'}`} />
+                      <span className="text-xs font-semibold text-slate-300">កាត់ Noise & Hiss (សំឡេងរំខាន)</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={micEngine.toggleNoiseCut}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        micEngine.isNoiseCutActive ? 'bg-emerald-600 text-white shadow-sm' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {micEngine.isNoiseCutActive ? 'កាត់ NOISE: ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  {/* Keep Karaoke Music Normal (No Ducking) Toggle */}
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800 mt-2">
+                    <div className="flex items-center gap-2">
+                      <Volume2 className={`w-4 h-4 ${micEngine.keepMusicNormal ? 'text-pink-400' : 'text-slate-500'}`} />
+                      <div>
+                        <span className="text-xs font-semibold text-slate-300 block">រក្សាសំឡេងភ្លេងធម្មតា</span>
+                        <span className="text-[10px] text-slate-400">មិនបន្ថយ ឬទម្លាក់ភ្លេងពេលច្រៀង</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={micEngine.toggleKeepMusicNormal}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        micEngine.keepMusicNormal ? 'bg-pink-600 text-white shadow-sm' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {micEngine.keepMusicNormal ? 'ភ្លេងធម្មតា: ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  {/* Open Voice Studio PRO from Mobile Drawer */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileSettingsOpen(false);
+                      setIsVoiceStudioOpen(true);
+                    }}
+                    className="w-full mt-2 py-3 px-3 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-purple-500/25 active:scale-95 transition-all"
+                  >
+                    <Sparkles className="w-4 h-4 text-white animate-pulse" />
+                    <span>🎙️ បើក KTV Voice Studio PRO (Auto-Tune & FX)</span>
+                  </button>
+
+                  {/* Keep Karaoke Music Normal (No Ducking) Toggle */}
+                  <div className="flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800 mt-2">
+                    <div className="flex items-center gap-2">
+                      <Volume2 className={`w-4 h-4 ${micEngine.keepMusicNormal ? 'text-pink-400' : 'text-slate-500'}`} />
+                      <div>
+                        <span className="text-xs font-semibold text-slate-300 block">រក្សាសំឡេងភ្លេងធម្មតា</span>
+                        <span className="text-[10px] text-slate-400">មិនបន្ថយ ឬទម្លាក់ភ្លេងពេលច្រៀង</span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={micEngine.toggleKeepMusicNormal}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                        micEngine.keepMusicNormal ? 'bg-pink-600 text-white shadow-sm' : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {micEngine.keepMusicNormal ? 'ភ្លេងធម្មតា: ON' : 'OFF'}
+                    </button>
+                  </div>
+
+                  {/* Open Voice Studio PRO from Mobile Drawer */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMobileSettingsOpen(false);
+                      setIsVoiceStudioOpen(true);
+                    }}
+                    className="w-full mt-2 py-3 px-3 rounded-2xl bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-500 text-white font-extrabold text-xs flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-purple-500/25 active:scale-95 transition-all"
+                  >
+                    <Sparkles className="w-4 h-4 text-white animate-pulse" />
+                    <span>🎙️ បើក KTV Voice Studio PRO (Auto-Tune & FX)</span>
+                  </button>
                 </div>
               </div>
             )}
@@ -1055,20 +1298,43 @@ export function App() {
             {/* Drawer Tab 3: Echo & Delay Setting */}
             {mobileDrawerTab === 'echo' && (
               <div className="space-y-4 animate-fade-in">
-                {/* Echo Toggle */}
+                {/* Vocal Latency & Echo Mode Switch (Real-Time 0ms vs Echo) */}
                 <div className="flex items-center justify-between p-3 rounded-xl bg-slate-950 border border-slate-800">
-                  <div className="flex items-center gap-2 text-xs font-bold text-slate-200">
-                    <Waves className={`w-4 h-4 ${micEngine.isEchoOn ? 'text-indigo-400 animate-pulse' : 'text-slate-500'}`} />
-                    <span>Echo Effect (អេកូ)</span>
+                  <div className="flex items-center gap-2">
+                    <Zap className={`w-4 h-4 ${!micEngine.isEchoOn ? 'text-amber-400' : 'text-slate-500'}`} />
+                    <div>
+                      <span className="text-xs font-bold text-slate-200 block">
+                        {!micEngine.isEchoOn ? '⚡ សំឡេងផ្ទាល់ (0ms មិន Slow)' : '🌊 សំឡេងអេកូ (Echo Studio)'}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {!micEngine.isEchoOn ? 'សំឡេងលឺភ្លាមៗ គ្មាន lag' : 'អេកូបែប Studio Reverb ស្រទន់'}
+                      </span>
+                    </div>
                   </div>
-                  <button
-                    onClick={() => micEngine.setIsEchoOn(!micEngine.isEchoOn)}
-                    className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                      micEngine.isEchoOn ? 'bg-indigo-600 text-white shadow-sm' : 'bg-slate-800 text-slate-400'
-                    }`}
-                  >
-                    {micEngine.isEchoOn ? 'ECHO: ON' : 'ECHO: OFF'}
-                  </button>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => micEngine.setIsEchoOn(false)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                        !micEngine.isEchoOn
+                          ? 'bg-amber-500 text-slate-950 font-black shadow-sm'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      ⚡ 0ms ផ្ទាល់
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => micEngine.setIsEchoOn(true)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold cursor-pointer transition-all ${
+                        micEngine.isEchoOn
+                          ? 'bg-indigo-600 text-white font-bold shadow-sm'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      🌊 អេកូ
+                    </button>
+                  </div>
                 </div>
 
                 {/* Echo Feedback Wetness Slider */}
@@ -1187,6 +1453,14 @@ export function App() {
         stage={processingStage}
         onStartInstantAutoVocalCut={handleStartInstantAutoVocalCut}
         isInstantCutLoading={isInstantCutLoading}
+      />
+
+      {/* KTV Voice Studio PRO Modal Rack */}
+      <KtvVoiceStudioPro
+        studio={micEngine}
+        isOpen={isVoiceStudioOpen}
+        onClose={() => setIsVoiceStudioOpen(false)}
+        videoTitle={videoTitle}
       />
 
       {/* Footer */}

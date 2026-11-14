@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   VolumeX,
+  Volume2,
   ShieldCheck,
   Activity,
   AlertTriangle,
@@ -109,8 +110,17 @@ export function KaraokePlayer({
 
           {/* Strictly Muted Badge */}
           <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-800 border border-slate-700 text-slate-300">
-            <VolumeX className="w-3.5 h-3.5 text-pink-400" />
-            <span className="text-[11px] font-medium">YT Audio: Muted</span>
+            {audioLoaded ? (
+              <>
+                <VolumeX className="w-3.5 h-3.5 text-pink-400" />
+                <span className="text-[11px] font-medium">AI Stems: Active</span>
+              </>
+            ) : (
+              <>
+                <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="text-[11px] font-medium">Audio: Direct</span>
+              </>
+            )}
           </div>
 
           {/* AI Audio Status */}
@@ -126,9 +136,7 @@ export function KaraokePlayer({
             ) : (
               <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-amber-400 animate-spin" />
             )}
-            <span>
-              {audioLoaded ? 'AI Ready (95%+ Cut)' : 'Preparing...'}
-            </span>
+            <span>{audioLoaded ? 'AI Ready (95%+ Cut)' : 'Preparing AI...'}</span>
           </div>
         </div>
       </div>
@@ -146,125 +154,53 @@ export function KaraokePlayer({
         {/* The YouTube IFrame target element */}
         <div id={containerId} className="w-full h-full" />
 
-        {/* Studio Karaoke Visualizer Mode when Embedding is Restricted (Error 101/150) */}
+        {/* Embedded Restriction Overlay (Error 101/150) */}
         {isRestricted && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-between p-6 overflow-hidden bg-slate-950 select-none animate-fade-in">
-            {/* Blurred Album Art Background with Ambient Lighting */}
+          <div className="absolute inset-0 bg-slate-950/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20 overflow-y-auto">
             {thumbnailUrl && (
-              <div
-                className="absolute inset-0 bg-cover bg-center filter blur-2xl opacity-25 scale-110 pointer-events-none transition-all duration-700"
-                style={{ backgroundImage: `url(${thumbnailUrl})` }}
-              />
+              <div className="relative w-36 aspect-video rounded-xl overflow-hidden mb-3 border border-slate-700 shadow-lg">
+                <img src={thumbnailUrl} alt={videoTitle} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                  <AlertTriangle className="w-6 h-6 text-amber-400" />
+                </div>
+              </div>
             )}
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/80 to-transparent pointer-events-none" />
-
-            {/* Top Bar inside Visualizer */}
-            <div className="relative z-10 w-full flex items-center justify-between text-xs">
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-pink-500/10 border border-pink-500/30 text-pink-300 font-semibold shadow-sm">
-                <Radio className="w-3.5 h-3.5 text-pink-400 animate-pulse" />
-                <span>Karaoke Studio Visualizer Active</span>
-              </span>
-
+            <h3 className="text-base font-bold text-slate-100 mb-1">
+              ម្ចាស់វីដេអូបិទមិនឱ្យចាក់លើគេហទំព័រក្រៅ (Error {playerError.code})
+            </h3>
+            <p className="text-xs text-slate-400 max-w-sm mb-4 leading-relaxed">
+              ម្ចាស់កម្មសិទ្ធិបានបិទការចាក់លើកញ្ចក់ IFrame។ លោកអ្នកអាចស្វែងរកកំណែចម្រៀង Lyrics ផ្សេង ឬបើកលើ YouTube ផ្ទាល់។
+            </p>
+            <div className="flex flex-wrap items-center justify-center gap-2">
               <button
-                onClick={() => setDismissWarning((prev) => !prev)}
-                className="inline-flex items-center gap-1 px-3 py-1 rounded-full bg-slate-800/80 hover:bg-slate-700 text-slate-300 transition-all cursor-pointer text-[11px]"
+                type="button"
+                onClick={() => onSearchAlternative && onSearchAlternative(getCleanSearchQuery())}
+                className="px-4 py-2 rounded-xl bg-pink-600 hover:bg-pink-500 text-white font-bold text-xs flex items-center gap-1.5 shadow-lg shadow-pink-600/30 cursor-pointer"
               >
-                {dismissWarning ? <Eye className="w-3 h-3" /> : <EyeOff className="w-3 h-3" />}
-                <span>{dismissWarning ? 'បង្ហាញព័ត៌មាន (Show Info)' : 'លាក់ព័ត៌មាន (Hide Info)'}</span>
+                <Search className="w-3.5 h-3.5" />
+                <span>ស្វែងរកបទស្រដៀង (Lyrics)</span>
               </button>
-            </div>
-
-            {/* Central Animated Music Stage */}
-            <div className="relative z-10 flex flex-col items-center text-center space-y-3 max-w-lg mx-auto my-auto">
-              {/* Glowing Vinyl Disk */}
-              <div className="relative w-28 h-28 sm:w-32 sm:h-32 flex items-center justify-center">
-                <div className="absolute inset-0 rounded-full bg-gradient-to-tr from-pink-500/30 via-purple-500/30 to-cyan-500/30 animate-ping opacity-60 pointer-events-none" />
-                <div className="relative w-full h-full rounded-full bg-slate-900 border-4 border-slate-800 shadow-2xl p-1 flex items-center justify-center overflow-hidden animate-spin" style={{ animationDuration: '8s' }}>
-                  {thumbnailUrl ? (
-                    <img src={thumbnailUrl} alt="Album Art" className="w-full h-full object-cover rounded-full opacity-80" />
-                  ) : (
-                    <Disc3 className="w-16 h-16 text-pink-400" />
-                  )}
-                  {/* Center vinyl hole */}
-                  <div className="absolute w-7 h-7 bg-slate-950 border-2 border-pink-500 rounded-full flex items-center justify-center">
-                    <div className="w-2 h-2 bg-pink-400 rounded-full" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Title & Status */}
-              <div className="space-y-1 px-4">
-                <h3 className="text-base sm:text-lg font-extrabold text-slate-100 line-clamp-2 leading-snug">
-                  {videoTitle || 'បទចម្រៀងខារ៉ាអូខេ'}
-                </h3>
-                <p className="text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>ភ្លេងខារ៉ាអូខេ AI (95%+ Vocal Cut) កំពុងចាក់ជូនច្រៀង!</span>
-                </p>
-              </div>
-
-              {/* Warning and Action Card */}
-              {!dismissWarning && (
-                <div className="p-3.5 rounded-2xl bg-slate-900/90 border border-slate-700/80 shadow-xl space-y-3 text-xs animate-fade-in">
-                  <div className="flex items-start gap-2.5 text-left text-slate-300">
-                    <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                    <p className="text-[11px] leading-relaxed text-slate-300">
-                      ម្ចាស់បទដើមបានបិទការបញ្ចាំងវីដេអូខាងក្រៅ (Embed Restricted Error 101/150) ប៉ុន្តែភ្លេងខារ៉ាអូខេ AI នៅតែដំណើរការ និងច្រៀងបានធម្មតា!
-                    </p>
-                  </div>
-
-                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-                    {onSearchAlternative && (
-                      <button
-                        onClick={() => onSearchAlternative(getCleanSearchQuery())}
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-pink-500 to-purple-600 hover:from-pink-400 hover:to-purple-500 text-white font-bold text-xs tracking-wide transition-all shadow-md shadow-pink-500/20 cursor-pointer"
-                      >
-                        <Search className="w-3.5 h-3.5" />
-                        <span>ស្វែងរកវីដេអូ Lyrics ជំនួសភ្លាមៗ</span>
-                      </button>
-                    )}
-
-                    <a
-                      href={`https://www.youtube.com/watch?v=${videoId}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white font-medium text-xs transition-all cursor-pointer"
-                    >
-                      <ExternalLink className="w-3.5 h-3.5" />
-                      <span>មើលវីដេអូលើ YouTube</span>
-                    </a>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Bottom Live Equalizer Spectrum Waves */}
-            <div className="relative z-10 w-full flex items-end justify-center gap-1.5 h-7 pb-1">
-              {[35, 60, 85, 45, 95, 70, 50, 100, 65, 80, 55, 90, 40, 75, 60, 85, 50, 70].map((h, i) => (
-                <span
-                  key={i}
-                  className="w-1.5 rounded-t bg-gradient-to-t from-pink-500 via-purple-500 to-cyan-400 opacity-80 animate-pulse"
-                  style={{
-                    height: `${h}%`,
-                    animationDelay: `${(i * 0.1).toFixed(1)}s`,
-                    animationDuration: '0.8s',
-                  }}
-                />
-              ))}
+              <a
+                href={`https://www.youtube.com/watch?v=${videoId}`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-1.5 cursor-pointer"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span>បើកលើ YouTube</span>
+              </a>
             </div>
           </div>
         )}
 
-        {/* Generic Error Overlay for other errors */}
+        {/* Generic Error Overlay */}
         {playerError && !isRestricted && (
           <div className="absolute inset-0 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-20">
             <div className="p-3 bg-rose-500/20 rounded-full mb-3 border border-rose-500/40">
               <AlertTriangle className="w-8 h-8 text-rose-400" />
             </div>
             <h3 className="text-lg font-bold text-slate-100 mb-1">Player Error ({playerError.code})</h3>
-            <p className="text-sm text-slate-300 max-w-md mb-4 leading-relaxed">
-              {playerError.message}
-            </p>
+            <p className="text-sm text-slate-300 max-w-md mb-4 leading-relaxed">{playerError.message}</p>
           </div>
         )}
 
@@ -279,4 +215,5 @@ export function KaraokePlayer({
     </div>
   );
 }
+
 export default KaraokePlayer;

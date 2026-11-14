@@ -20,10 +20,11 @@ export function useAudioSync({ instrumentalUrl, vocalsUrl, playerRef, isPlayerRe
   const instAudioRef = useRef(new Audio());
   const vocalAudioRef = useRef(new Audio());
 
-  // Karaoke controls state: Default to VOCALS MUTED (isVocalOn = false)
+  // Karaoke controls state: Default to VOCALS MUTED (isVocalOn = false, audioMode = 'instrumental')
   // so the user immediately gets pure AI Instrumental Karaoke!
+  const [audioMode, setAudioModeState] = useState('instrumental'); // 'instrumental' | 'vocals' | 'original'
   const [isVocalOn, setIsVocalOn] = useState(false);
-  const [instVolume, setInstVolume] = useState(1.0); // Full instrumental volume
+  const [instVolume, setInstVolume] = useState(0.82); // Balanced instrumental volume so live voice cuts through clearly
   const [vocalVolume, setVocalVolume] = useState(0.70); // 0.0 - 1.0
   const [audioLoaded, setAudioLoaded] = useState(false);
   const [currentDriftMs, setCurrentDriftMs] = useState(0);
@@ -73,8 +74,8 @@ export function useAudioSync({ instrumentalUrl, vocalsUrl, playerRef, isPlayerRe
 
     inst.volume = instVolume;
 
-    let instReady = false;
-    let vocReady = !hasVocals; // If no separate vocalsUrl, vocReady is immediately true!
+    let instReady = inst.readyState >= 2;
+    let vocReady = !hasVocals || voc.readyState >= 2;
 
     const checkBothReady = () => {
       if (instReady && vocReady) {
@@ -93,7 +94,11 @@ export function useAudioSync({ instrumentalUrl, vocalsUrl, playerRef, isPlayerRe
             const ytTime = player.getCurrentTime ? player.getCurrentTime() : 0;
             inst.currentTime = ytTime;
             if (hasVocals) voc.currentTime = ytTime;
-            inst.play().catch((err) => console.warn('inst.play() error:', err));
+            try { player.mute(); player.setVolume(0); } catch (e) {}
+            inst.play().catch((err) => {
+              console.warn('inst.play() blocked on mobile, unmuting YouTube fallback:', err);
+              try { player.unMute(); player.setVolume(100); } catch (e) {}
+            });
             if (hasVocals) voc.play().catch((err) => console.warn('voc.play() error:', err));
           }
         }
@@ -110,20 +115,18 @@ export function useAudioSync({ instrumentalUrl, vocalsUrl, playerRef, isPlayerRe
       checkBothReady();
     };
 
-    inst.addEventListener('canplaythrough', handleInstCanPlay, { once: true });
-    if (hasVocals) {
-      voc.addEventListener('canplaythrough', handleVocCanPlay, { once: true });
+    if (!instReady) {
+      inst.addEventListener('canplay', handleInstCanPlay, { once: true });
     }
-
-    // Fallback: in case canplaythrough fired immediately or cached
-    if (inst.readyState >= 3) instReady = true;
-    if (hasVocals && voc.readyState >= 3) vocReady = true;
+    if (hasVocals && !vocReady) {
+      voc.addEventListener('canplay', handleVocCanPlay, { once: true });
+    }
     checkBothReady();
 
     return () => {
-      inst.removeEventListener('canplaythrough', handleInstCanPlay);
+      inst.removeEventListener('canplay', handleInstCanPlay);
       if (hasVocals) {
-        voc.removeEventListener('canplaythrough', handleVocCanPlay);
+        voc.removeEventListener('canplay', handleVocCanPlay);
       }
     };
   }, [instrumentalUrl, vocalsUrl]);
@@ -165,8 +168,18 @@ export function useAudioSync({ instrumentalUrl, vocalsUrl, playerRef, isPlayerRe
         voc.muted = !isVocalOn;
       }
 
-      const p1 = inst.play();
-      if (p1 && p1.catch) p1.catch((e) => console.warn('Instrumental playback error:', e));
+      if (inst.src && inst.src !== window.location.href && instrumentalUrl) {
+        try { player.mute(); player.setVolume(0); } catch (e) {}
+        const p1 = inst.play();
+        if (p1 && p1.catch) {
+          p1.catch((e) => {
+            console.warn('Instrumental playback blocked on mobile, unmuting YouTube:', e);
+            try { player.unMute(); player.setVolume(100); } catch (err) {}
+          });
+        }
+      } else {
+        try { player.unMute(); player.setVolume(100); } catch (err) {}
+      }
 
       if (hasVocals && voc.src) {
         const p2 = voc.play();
@@ -233,16 +246,54 @@ export function useAudioSync({ instrumentalUrl, vocalsUrl, playerRef, isPlayerRe
     return () => clearInterval(intervalId);
   }, [playerRef, audioLoaded]);
 
-  // Vocal toggle handler (Mute / Unmute vocals in real time)
-  const toggleVocals = useCallback(() => {
-    setIsVocalOn((prev) => {
-      const next = !prev;
-      if (vocalAudioRef.current) {
-        vocalAudioRef.current.muted = !next;
+  // Explicit 3-mode selector: 'instrumental' (no vocals) | 'vocals' (isolated vocals) | 'original' (both)
+  const setAudioMode = useCallback((mode) => {
+    setAudioModeState(mode);
+    const inst = instAudioRef.current;
+    const voc = vocalAudioRef.current;
+
+    if (mode === 'instrumental') {
+      if (inst) inst.muted = false;
+      if (voc) voc.muted = true;
+      setIsVocalOn(false);
+    } else if (mode === 'vocals') {
+      if (inst) inst.muted = true;
+      if (voc) {
+        voc.muted = false;
+        voc.volume = vocalVolume;
       }
-      return next;
+      setIsVocalOn(true);
+    } else if (mode === 'original') {
+      if (inst) inst.muted = false;
+      if (voc) {
+        voc.muted = false;
+        voc.volume = vocalVolume;
+      }
+      setIsVocalOn(true);
+    }
+  }, [vocalVolume]);
+
+  // Vocal toggle handler (Toggles between Instrumental and Original)
+  const toggleVocals = useCallback(() => {
+    setAudioModeState((prevMode) => {
+      const nextMode = prevMode === 'instrumental' ? 'original' : 'instrumental';
+      const inst = instAudioRef.current;
+      const voc = vocalAudioRef.current;
+      if (nextMode === 'instrumental') {
+        if (inst) inst.muted = false;
+        if (voc) voc.muted = true;
+        setIsVocalOn(false);
+      } else {
+        if (inst) inst.muted = false;
+        if (voc) {
+          voc.muted = false;
+          voc.volume = vocalVolume;
+        }
+        setIsVocalOn(true);
+      }
+      return nextMode;
     });
-  }, []);
+  }, [vocalVolume]);
 
   const seekAudio = useCallback((seconds) => {
     if (instAudioRef.current) instAudioRef.current.currentTime = seconds;
@@ -269,6 +320,8 @@ export function useAudioSync({ instrumentalUrl, vocalsUrl, playerRef, isPlayerRe
   }, []);
 
   return {
+    audioMode,
+    setAudioMode,
     isVocalOn,
     setIsVocalOn,
     toggleVocals,

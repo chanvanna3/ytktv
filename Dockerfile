@@ -10,19 +10,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Install PyTorch CPU first (saves download size and builds cleanly)
+# Upgrade pip and install PyTorch CPU first (clean and fast build)
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 
 # Copy and install python dependencies
-COPY backend/requirements.txt /app/requirements.txt
+COPY requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Pre-download Demucs htdemucs model weights so first request is instant
-RUN python -c "import demucs.pretrained; demucs.pretrained.get_model('htdemucs')"
-
-# Copy backend application code
-COPY backend/ /app/
+# Copy application code
+COPY . /app/
 
 # Environment variables
 ENV PORT=8000

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -121,39 +122,102 @@ def save_metadata(video_id: str, data: Dict[str, Any]):
 
 
 def download_audio(video_id: str, target_dir: Path) -> Path:
-    """Downloads best audio from YouTube as a WAV file using yt-dlp."""
+    """Downloads audio from YouTube as a WAV file using resilient multi-client strategies to bypass datacenter IP bot detection."""
     target_dir.mkdir(parents=True, exist_ok=True)
     out_template = str(target_dir / "audio.%(ext)s")
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': out_template,
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'wav',
-            'preferredquality': '192',
-        }],
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': False,
-    }
+    # Multi-client strategy: Android, Android Embedded, TV Embedded, and Web (with Node.js JS solver)
+    strategies = [
+        # Strategy 1: Android InnerTube (bypasses bot challenge and format 18 SABR experiment)
+        {
+            'name': 'Android InnerTube',
+            'format': 'ba/b/best',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android'],
+                }
+            },
+        },
+        # Strategy 2: Android Embedded (extracts direct format 251 Opus)
+        {
+            'name': 'Android Embedded',
+            'format': 'ba/b/best',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['android_embedded'],
+                }
+            },
+        },
+        # Strategy 3: TV Embedded (extracts direct format 251 Opus)
+        {
+            'name': 'TV Embedded',
+            'format': 'ba/b/best',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['tv_embedded'],
+                }
+            },
+        },
+        # Strategy 4: Web with JS Challenge Solver
+        {
+            'name': 'Web with JS Solver',
+            'format': 'ba/b/best',
+            'extractor_args': {
+                'youtube': {
+                    'player_client': ['web'],
+                }
+            },
+        },
+    ]
 
-    logger.info(f"Downloading audio for video {video_id} using yt-dlp...")
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+    last_error = None
+    for strat in strategies:
+        ydl_opts = {
+            'format': strat['format'],
+            'outtmpl': out_template,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'wav',
+                'preferredquality': '192',
+            }],
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': False,
+            'extractor_args': strat.get('extractor_args', {}),
+        }
+
+        # Optional: If YOUTUBE_COOKIES env or cookies.txt exists, pass to yt-dlp
+        cookies_env = os.getenv("YOUTUBE_COOKIES")
+        cookies_path = BASE_DIR / "cookies.txt"
+        if cookies_env and not cookies_path.is_file():
+            try:
+                with open(cookies_path, "w", encoding="utf-8") as f:
+                    f.write(cookies_env.strip())
+            except Exception as e:
+                logger.warning(f"Failed to write YOUTUBE_COOKIES env to file: {e}")
+
+        if cookies_path.is_file() and cookies_path.stat().st_size > 10:
+            ydl_opts['cookiefile'] = str(cookies_path)
+
         try:
-            info = ydl.extract_info(url, download=True)
-            meta = {
-                "title": info.get("title", f"Video {video_id}"),
-                "channel": info.get("uploader", "Unknown"),
-                "duration": info.get("duration", 0),
-                "thumbnail": info.get("thumbnail", ""),
-                "video_id": video_id
-            }
-            save_metadata(video_id, meta)
+            logger.info(f"Downloading audio for {video_id} using {strat['name']}...")
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                meta = {
+                    "title": info.get("title", f"Video {video_id}"),
+                    "channel": info.get("uploader", "Unknown"),
+                    "duration": info.get("duration", 0),
+                    "thumbnail": info.get("thumbnail", ""),
+                    "video_id": video_id
+                }
+                save_metadata(video_id, meta)
+                break
         except Exception as e:
-            logger.error(f"yt-dlp extraction failed for {video_id}: {e}")
-            raise Exception(f"Failed to fetch YouTube audio: {str(e)}")
+            logger.warning(f"Download strategy {strat['name']} failed: {e}")
+            last_error = e
+    else:
+        raise Exception(f"Failed to fetch YouTube audio: {str(last_error)}")
 
     wav_file = target_dir / "audio.wav"
     if not wav_file.exists():
@@ -183,6 +247,10 @@ def run_demucs_separation_sync(video_id: str, audio_path: Path, output_dir: Path
         "demucs.separate",
         "-n",
         DEMUCS_MODEL,
+        "-d",
+        "cpu",
+        "-j",
+        "4",
         "--two-stems=vocals",
         "-o",
         str(temp_demucs_dir),
@@ -228,18 +296,49 @@ def run_demucs_separation_sync(video_id: str, audio_path: Path, output_dir: Path
         active_jobs[video_id]["progress"] = 96
         active_jobs[video_id]["message"] = "កំពុងរៀបចំ និងរក្សាទុកឯកសារភ្លេងខារ៉ាអូខេ..."
 
-    # Locate generated stems recursively
-    found_vocals = list(temp_demucs_dir.glob("**/vocals.wav"))
-    found_no_vocals = list(temp_demucs_dir.glob("**/no_vocals.wav"))
+    # Locate generated stems dynamically
+    found_vocals = list(temp_demucs_dir.rglob("vocals.wav")) or list(Path("separated").rglob("vocals.wav"))
+    found_no_vocals = list(temp_demucs_dir.rglob("no_vocals.wav")) or list(Path("separated").rglob("no_vocals.wav"))
+
+    if not found_vocals:
+        found_vocals = [p for p in temp_demucs_dir.rglob("*.wav") if "vocal" in p.name.lower() and "no" not in p.name.lower()]
+    if not found_no_vocals:
+        found_no_vocals = [p for p in temp_demucs_dir.rglob("*.wav") if "no_vocal" in p.name.lower() or "instrumental" in p.name.lower()]
 
     if not found_vocals or not found_no_vocals:
         raise Exception("Separated stems (vocals/no_vocals) not found in Demucs output.")
 
+    src_vocals = found_vocals[0]
+    src_no_vocals = found_no_vocals[0]
+
+    if src_vocals.stat().st_size < 1000:
+        raise Exception(f"Demucs generated invalid/empty vocals stem: {src_vocals}")
+    if src_no_vocals.stat().st_size < 1000:
+        raise Exception(f"Demucs generated invalid/empty no_vocals stem: {src_no_vocals}")
+
     target_vocals = output_dir / "vocals.wav"
     target_no_vocals = output_dir / "no_vocals.wav"
 
-    shutil.move(str(found_vocals[0]), str(target_vocals))
-    shutil.move(str(found_no_vocals[0]), str(target_no_vocals))
+    # CRITICAL: Verify instrumental is NOT original audio
+    if src_no_vocals.resolve() == audio_path.resolve():
+        raise Exception("Demucs error: Instrumental source is identical to original audio!")
+
+    # Safely copy to target destinations
+    if target_vocals.exists():
+        try: target_vocals.unlink()
+        except Exception: pass
+    if target_no_vocals.exists():
+        try: target_no_vocals.unlink()
+        except Exception: pass
+
+    shutil.copy2(str(src_vocals), str(target_vocals))
+    shutil.copy2(str(src_no_vocals), str(target_no_vocals))
+
+    # Verify both final files exist and are > 1000 bytes
+    if not target_vocals.is_file() or target_vocals.stat().st_size < 1000:
+        raise Exception("Target vocals.wav was not written successfully.")
+    if not target_no_vocals.is_file() or target_no_vocals.stat().st_size < 1000:
+        raise Exception("Target no_vocals.wav was not written successfully.")
 
     # Clean up temporary demucs folder to conserve disk space
     try:
@@ -256,16 +355,23 @@ async def run_pipeline(video_id: str, force: bool = False, lang: Optional[str] =
     async with job_locks[video_id]:
         video_dir = get_video_dir(video_id)
 
-        # Check if already cached (Both stems AND lyrics must exist)
+        # Check if already cached (stems exist on disk)
         if not force and stems_exist(video_id):
             meta = read_metadata(video_id)
-            if not lyrics_exist(video_id):
+            has_lyrics = lyrics_exist(video_id)
+            if not has_lyrics:
                 active_jobs[video_id] = {
-                    "status": "processing",
-                    "stage": "transcribing",
-                    "progress": 82,
-                    "message": "AI Whisper កំពុងស្តាប់ និងបង្កើតអក្សរខារ៉ាអូខេ (82%)...",
-                    "video_id": video_id
+                    "status": "completed",
+                    "stage": "ready_to_sing",
+                    "progress": 95,
+                    "message": "Vocal cut completed! Ready to sing / download instrumental.",
+                    "video_id": video_id,
+                    "title": meta.get("title", f"YouTube Video ({video_id})"),
+                    "vocals_url": f"/media/{video_id}/vocals.wav",
+                    "instrumental_url": f"/media/{video_id}/no_vocals.wav",
+                    "direct_audio_url": f"/media/{video_id}/audio.wav" if (video_dir / "audio.wav").exists() else None,
+                    "lyrics_ready": False,
+                    "cached": True
                 }
                 try:
                     await asyncio.to_thread(fetch_lyrics_for_video, video_id, False, lang)
@@ -274,15 +380,15 @@ async def run_pipeline(video_id: str, force: bool = False, lang: Optional[str] =
 
             active_jobs[video_id] = {
                 "status": "completed",
-                "stage": "completed",
+                "stage": "completed" if lyrics_exist(video_id) else "ready_to_sing",
                 "progress": 100,
-                "message": "រួចរាល់ 100% (Cached)",
+                "message": "Vocal cut completed! Ready to sing / download instrumental.",
                 "video_id": video_id,
                 "title": meta.get("title", f"YouTube Video ({video_id})"),
                 "vocals_url": f"/media/{video_id}/vocals.wav",
                 "instrumental_url": f"/media/{video_id}/no_vocals.wav",
                 "direct_audio_url": f"/media/{video_id}/audio.wav" if (video_dir / "audio.wav").exists() else None,
-                "lyrics_ready": True,
+                "lyrics_ready": lyrics_exist(video_id),
                 "cached": True
             }
             return
@@ -293,7 +399,7 @@ async def run_pipeline(video_id: str, force: bool = False, lang: Optional[str] =
                 "status": "processing",
                 "stage": "downloading",
                 "progress": 15,
-                "message": "កំពុងទាញយកសំឡេងពី YouTube...",
+                "message": "Downloading audio...",
                 "video_id": video_id
             }
 
@@ -301,40 +407,36 @@ async def run_pipeline(video_id: str, force: bool = False, lang: Optional[str] =
 
             active_jobs[video_id]["progress"] = 35
             active_jobs[video_id]["direct_audio_url"] = f"/media/{video_id}/audio.wav"
-            active_jobs[video_id]["message"] = "ទាញយកសំឡេងជោគជ័យ! កំពុងចាប់ផ្តើម AI Demucs..."
+            active_jobs[video_id]["message"] = "Separating vocals with AI..."
 
             # Stage 2: Separating with Demucs AI
             active_jobs[video_id]["stage"] = "separating"
             active_jobs[video_id]["progress"] = 40
-            active_jobs[video_id]["message"] = "AI កំពុងកាត់សំឡេងច្រៀងចេញ (95% Vocal Removal)..."
+            active_jobs[video_id]["message"] = "Separating vocals with AI..."
 
             await asyncio.to_thread(run_demucs_separation_sync, video_id, wav_path, video_dir)
 
-            # Stage 3: Transcribing Lyrics (AI Whisper Base / Captions)
-            active_jobs[video_id]["stage"] = "transcribing"
-            active_jobs[video_id]["progress"] = 85
-            active_jobs[video_id]["message"] = "AI Whisper កំពុងស្តាប់ និងបង្កើតអក្សរខារ៉ាអូខេ (85%)..."
+            # Stage 3: Vocal cut completed! Immediate availability of instrumental & vocals
+            meta = read_metadata(video_id)
+            active_jobs[video_id]["status"] = "completed"
+            active_jobs[video_id]["stage"] = "ready_to_sing"
+            active_jobs[video_id]["progress"] = 95
+            active_jobs[video_id]["message"] = "Vocal cut completed! Ready to sing / download instrumental."
+            active_jobs[video_id]["title"] = meta.get("title", f"YouTube Video ({video_id})")
+            active_jobs[video_id]["vocals_url"] = f"/media/{video_id}/vocals.wav"
+            active_jobs[video_id]["instrumental_url"] = f"/media/{video_id}/no_vocals.wav"
+            active_jobs[video_id]["direct_audio_url"] = f"/media/{video_id}/audio.wav"
+            active_jobs[video_id]["lyrics_ready"] = lyrics_exist(video_id)
 
+            # Stage 4: Transcribing Lyrics in background (does not block playback or download)
             try:
                 await asyncio.to_thread(fetch_lyrics_for_video, video_id, False, lang)
             except Exception as lyr_err:
                 logger.warning(f"Background lyrics transcription notice for {video_id}: {lyr_err}")
 
-            # Stage 4: Completed
-            meta = read_metadata(video_id)
-            active_jobs[video_id] = {
-                "status": "completed",
-                "stage": "completed",
-                "progress": 100,
-                "message": "បំបែកភ្លេង និងរៀបចំអក្សរខារ៉ាអូខេរួចរាល់ 100%!",
-                "video_id": video_id,
-                "title": meta.get("title", f"YouTube Video ({video_id})"),
-                "vocals_url": f"/media/{video_id}/vocals.wav",
-                "instrumental_url": f"/media/{video_id}/no_vocals.wav",
-                "direct_audio_url": f"/media/{video_id}/audio.wav",
-                "lyrics_ready": True,
-                "cached": False
-            }
+            active_jobs[video_id]["progress"] = 100
+            active_jobs[video_id]["stage"] = "completed"
+            active_jobs[video_id]["lyrics_ready"] = lyrics_exist(video_id)
             logger.info(f"Video {video_id} processing completed successfully.")
 
         except Exception as e:
@@ -417,6 +519,18 @@ class HistoryItemRequest(BaseModel):
     title: Optional[str] = None
 
 
+@app.get("/")
+async def root():
+    return {
+        "app": "YouTube AI Karaoke Studio API",
+        "status": "online",
+        "version": "2.1.0",
+        "demucs_model": DEMUCS_MODEL,
+        "docs": "/docs",
+        "health": "/api/health"
+    }
+
+
 @app.get("/api/health")
 async def health_check():
     return {
@@ -482,41 +596,47 @@ async def process_video(req: ProcessRequest, background_tasks: BackgroundTasks):
     # Record song sung to server history for multi-browser sync
     record_song_sung(video_id)
 
-    # 1. If already cached (BOTH stems AND lyrics exist), return completed immediately
-    if not req.force_reprocess and stems_exist(video_id) and lyrics_exist(video_id):
+    # 1. If already cached (BOTH stems exist), return completed immediately
+    if not req.force_reprocess and stems_exist(video_id):
         meta = read_metadata(video_id)
         video_dir = get_video_dir(video_id)
+        has_lyrics = lyrics_exist(video_id)
+        if not has_lyrics:
+            background_tasks.add_task(fetch_lyrics_for_video, video_id, False, req.language or "km")
         return {
             "status": "completed",
-            "stage": "completed",
-            "progress": 100,
-            "message": "រួចរាល់ 100% (Cached)",
+            "stage": "completed" if has_lyrics else "ready_to_sing",
+            "progress": 100 if has_lyrics else 95,
+            "message": "Vocal cut completed! Ready to sing / download instrumental.",
             "video_id": video_id,
             "title": meta.get("title", f"YouTube Video ({video_id})"),
             "vocals_url": f"/media/{video_id}/vocals.wav",
             "instrumental_url": f"/media/{video_id}/no_vocals.wav",
             "direct_audio_url": f"/media/{video_id}/audio.wav" if (video_dir / "audio.wav").exists() else None,
-            "lyrics_ready": True,
+            "lyrics_ready": has_lyrics,
             "cached": True
         }
 
     # 2. If already processing, return current job state
     current_job = active_jobs.get(video_id)
-    if current_job and current_job.get("status") == "processing":
+    if current_job and current_job.get("status") in ["processing", "completed"]:
         return current_job
 
     # 3. Initialize job and dispatch background processing
     initial_stage = "transcribing" if stems_exist(video_id) else "downloading"
-    initial_progress = 80 if stems_exist(video_id) else 10
-    initial_msg = "AI កំពុងស្តាប់ និងរៀបចំអក្សរខារ៉ាអូខេ (80%)..." if stems_exist(video_id) else "កំពុងទាញយកសំឡេងពី YouTube..."
+    initial_progress = 95 if stems_exist(video_id) else 10
+    initial_msg = "Vocal cut completed! Ready to sing / download instrumental." if stems_exist(video_id) else "Downloading audio..."
 
     active_jobs[video_id] = {
-        "status": "processing",
+        "status": "completed" if stems_exist(video_id) else "processing",
         "stage": initial_stage,
         "progress": initial_progress,
         "message": initial_msg,
         "video_id": video_id
     }
+    if stems_exist(video_id):
+        active_jobs[video_id]["vocals_url"] = f"/media/{video_id}/vocals.wav"
+        active_jobs[video_id]["instrumental_url"] = f"/media/{video_id}/no_vocals.wav"
 
     background_tasks.add_task(run_pipeline, video_id, req.force_reprocess, req.language or "km")
     return active_jobs[video_id]
@@ -528,21 +648,22 @@ async def get_status(video_id: str):
     if not validate_video_id(video_id):
         raise HTTPException(status_code=400, detail="Invalid video ID")
 
-    # 1. If stems exist AND lyrics exist on disk, return completed
-    if stems_exist(video_id) and lyrics_exist(video_id):
+    # 1. If stems exist on disk, always return completed with separate actual stem URLs!
+    if stems_exist(video_id):
         meta = read_metadata(video_id)
         video_dir = get_video_dir(video_id)
+        has_lyrics = lyrics_exist(video_id)
         return {
             "status": "completed",
-            "stage": "completed",
-            "progress": 100,
-            "message": "រួចរាល់ 100%",
+            "stage": "completed" if has_lyrics else "ready_to_sing",
+            "progress": 100 if has_lyrics else 95,
+            "message": "Vocal cut completed! Ready to sing / download instrumental.",
             "video_id": video_id,
             "title": meta.get("title", ""),
             "vocals_url": f"/media/{video_id}/vocals.wav",
             "instrumental_url": f"/media/{video_id}/no_vocals.wav",
             "direct_audio_url": f"/media/{video_id}/audio.wav" if (video_dir / "audio.wav").exists() else None,
-            "lyrics_ready": True,
+            "lyrics_ready": has_lyrics,
             "cached": True
         }
 
@@ -552,25 +673,76 @@ async def get_status(video_id: str):
         video_dir = get_video_dir(video_id)
         if (video_dir / "audio.wav").exists():
             job["direct_audio_url"] = f"/media/{video_id}/audio.wav"
+        if (video_dir / "no_vocals.wav").exists() and (video_dir / "no_vocals.wav").stat().st_size > 1000:
+            job["instrumental_url"] = f"/media/{video_id}/no_vocals.wav"
+            job["vocals_url"] = f"/media/{video_id}/vocals.wav"
+            job["status"] = "completed"
         return job
 
-    # 3. If stems exist but lyrics are missing, mark transcribing
-    if stems_exist(video_id) and not lyrics_exist(video_id):
-        return {
-            "status": "processing",
-            "stage": "transcribing",
-            "progress": 82,
-            "message": "AI Whisper កំពុងស្តាប់ និងបង្កើតអក្សរខារ៉ាអូខេ (82%)...",
-            "video_id": video_id
-        }
-
-    # 4. Idle / not started
+    # 3. Idle / not started
     return {
         "status": "idle",
         "stage": "idle",
         "progress": 0,
         "message": "មិនទាន់ចាប់ផ្តើមដំណើរការនៅឡើយ"
     }
+
+
+@app.get("/api/download/{video_id}/instrumental")
+async def download_instrumental(video_id: str):
+    """Downloads pure separated instrumental track (no_vocals.wav) with vocal removed."""
+    if not validate_video_id(video_id):
+        raise HTTPException(status_code=400, detail="Invalid video ID")
+    video_dir = get_video_dir(video_id)
+    no_vocals_path = video_dir / "no_vocals.wav"
+    if not no_vocals_path.is_file() or no_vocals_path.stat().st_size < 1000:
+        raise HTTPException(status_code=404, detail="Instrumental track (no_vocals.wav) not ready or not found.")
+    meta = read_metadata(video_id)
+    raw_title = meta.get("title") or video_id
+    safe_title = re.sub(r'[\\/*?:"<>|]', "", raw_title).strip() or video_id
+    return FileResponse(
+        path=str(no_vocals_path),
+        media_type="audio/wav",
+        filename=f"{safe_title}_instrumental.wav"
+    )
+
+
+@app.get("/api/download/{video_id}/vocals")
+async def download_vocals(video_id: str):
+    """Downloads pure isolated vocal track (vocals.wav)."""
+    if not validate_video_id(video_id):
+        raise HTTPException(status_code=400, detail="Invalid video ID")
+    video_dir = get_video_dir(video_id)
+    vocals_path = video_dir / "vocals.wav"
+    if not vocals_path.is_file() or vocals_path.stat().st_size < 1000:
+        raise HTTPException(status_code=404, detail="Vocals track (vocals.wav) not ready or not found.")
+    meta = read_metadata(video_id)
+    raw_title = meta.get("title") or video_id
+    safe_title = re.sub(r'[\\/*?:"<>|]', "", raw_title).strip() or video_id
+    return FileResponse(
+        path=str(vocals_path),
+        media_type="audio/wav",
+        filename=f"{safe_title}_vocals.wav"
+    )
+
+
+@app.get("/api/download/{video_id}/original")
+async def download_original(video_id: str):
+    """Downloads original unseparated audio track (audio.wav)."""
+    if not validate_video_id(video_id):
+        raise HTTPException(status_code=400, detail="Invalid video ID")
+    video_dir = get_video_dir(video_id)
+    audio_path = video_dir / "audio.wav"
+    if not audio_path.is_file() or audio_path.stat().st_size < 1000:
+        raise HTTPException(status_code=404, detail="Original audio track (audio.wav) not ready or not found.")
+    meta = read_metadata(video_id)
+    raw_title = meta.get("title") or video_id
+    safe_title = re.sub(r'[\\/*?:"<>|]', "", raw_title).strip() or video_id
+    return FileResponse(
+        path=str(audio_path),
+        media_type="audio/wav",
+        filename=f"{safe_title}_original.wav"
+    )
 
 
 @app.get("/api/search")
@@ -640,11 +812,23 @@ async def search_youtube(q: str = Query(..., min_length=1, description="Search q
         raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
 
 
+_whisper_model = None
+
+def get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        import whisper
+        logger.info("Loading Whisper 'base' model into memory...")
+        _whisper_model = whisper.load_model("base")
+        logger.info("Whisper 'base' model loaded successfully.")
+    return _whisper_model
+
+
 def fetch_lyrics_for_video(video_id: str, force_whisper: bool = False, force_lang: Optional[str] = "km") -> Dict[str, Any]:
     """
     Extracts synchronized timestamped lyrics for a song:
     1. YouTube captions / timedtext json3 format (with millisecond sync)
-    2. Whisper AI transcription on isolated vocals stem (vocals.wav) using Whisper 'base' model
+    2. Whisper AI transcription on isolated vocals stem (vocals.wav) or audio.wav using Whisper 'base' model
     """
     video_dir = get_video_dir(video_id)
     lyrics_file = video_dir / "lyrics.json"
@@ -652,23 +836,24 @@ def fetch_lyrics_for_video(video_id: str, force_whisper: bool = False, force_lan
     title = meta.get("title", "")
     channel = meta.get("channel", "")
 
-    # Language resolution: Defaults to 'km' (Khmer / Cambodia)
-    req_lang = (force_lang or "km").lower().strip()
-    if req_lang in ("km", "khmer", "cambodia"):
+    # Language resolution: Detect if song is Khmer or International
+    req_lang = (force_lang or "auto").lower().strip()
+    corpus = f"{title} {channel}".lower()
+    has_khmer_text = bool(re.search(r'[\u1780-\u17FF]', corpus)) or any(
+        kw in corpus for kw in ("khmer", "cambodia", "manith", "tena", "jerm", "vannda", "rhm", "sunday", "town", "hang meas", "pleng")
+    )
+    if req_lang in ("km", "khmer", "cambodia") or (req_lang in ("auto", "") and has_khmer_text):
         is_khmer = True
         target_lang = "km"
     elif req_lang in ("en", "english"):
         is_khmer = False
         target_lang = "en"
     elif req_lang == "auto":
-        corpus = f"{title} {channel}".lower()
-        is_khmer = bool(re.search(r'[\u1780-\u17FF]', corpus)) or any(
-            kw in corpus for kw in ("khmer", "cambodia", "manith", "tena", "jerm", "vannda", "rhm", "sunday", "town")
-        )
-        target_lang = "km" if is_khmer else None
+        is_khmer = False
+        target_lang = None
     else:
-        is_khmer = True
-        target_lang = "km"
+        is_khmer = has_khmer_text
+        target_lang = "km" if is_khmer else None
 
     # 1. Return cached lyrics if exists and not forcing re-transcribe
     if not force_whisper and lyrics_file.exists():
@@ -701,6 +886,15 @@ def fetch_lyrics_for_video(video_id: str, force_whisper: bool = False, force_lan
                 else:
                     chosen_track = subs.get("km") or auto_subs.get("km") or subs.get("en") or auto_subs.get("en")
 
+                # Fallback to ANY available subtitles if preferred language not found
+                if not chosen_track:
+                    chosen_track = (
+                        subs.get("km") or auto_subs.get("km") or
+                        subs.get("en") or auto_subs.get("en") or
+                        (list(subs.values())[0] if subs else None) or
+                        (list(auto_subs.values())[0] if auto_subs else None)
+                    )
+
                 if chosen_track:
                     json3_format = next((fmt for fmt in chosen_track if fmt.get("ext") == "json3"), None)
                     if json3_format and json3_format.get("url"):
@@ -719,8 +913,8 @@ def fetch_lyrics_for_video(video_id: str, force_whisper: bool = False, force_lan
                                         t_end = t_start + d_dur
 
                                         if segments and segments[-1]["text"] == text:
-                                            segments[-1]["end"] = max(segments[-1]["end"], round(t_end, 2))
-                                            continue
+                                             segments[-1]["end"] = max(segments[-1]["end"], round(t_end, 2))
+                                             continue
 
                                         segments.append({
                                             "id": idx,
@@ -737,22 +931,27 @@ def fetch_lyrics_for_video(video_id: str, force_whisper: bool = False, force_lan
         except Exception as e:
             logger.warning(f"YouTube captions fetch error for {video_id}: {e}")
 
-    # Strategy 2: AI Whisper Base Transcription on vocals stem (with Khmer language enforcement)
+    # Strategy 2: AI Whisper Base Transcription on vocals stem or audio.wav
     if not segments:
         try:
             vocals_path = video_dir / "vocals.wav"
             audio_path = video_dir / "audio.wav"
+
+            # If audio has not been downloaded yet, download it immediately
+            if not vocals_path.exists() and not audio_path.exists():
+                logger.info(f"Downloading audio for Whisper AI transcription ({video_id})...")
+                audio_path = download_audio(video_id, video_dir)
+
             target_audio = vocals_path if vocals_path.exists() else (audio_path if audio_path.exists() else None)
 
             if target_audio and target_audio.exists():
-                import whisper
-                logger.info(f"Transcribing {target_audio.name} using Whisper Base AI for {video_id} (is_khmer={is_khmer})...")
-                model = whisper.load_model("base")
+                logger.info(f"Transcribing {target_audio.name} using Whisper Base AI for {video_id} (is_khmer={is_khmer}, target_lang={target_lang})...")
+                model = get_whisper_model()
 
                 transcribe_kwargs = {"fp16": False}
                 if target_lang:
                     transcribe_kwargs["language"] = target_lang
-                if target_lang == "km" or is_khmer:
+                if is_khmer:
                     transcribe_kwargs["initial_prompt"] = "ទំនុកច្រៀងចម្រៀងខ្មែរ ភាសាខ្មែរ អក្សរខ្មែរ Cambodia Khmer song lyrics"
 
                 res = model.transcribe(str(target_audio), **transcribe_kwargs)
@@ -796,16 +995,16 @@ class SaveLyricsRequest(BaseModel):
 
 
 @app.get("/api/lyrics/{video_id}")
-async def get_lyrics(video_id: str, force_whisper: bool = False, lang: Optional[str] = "km"):
+async def get_lyrics(video_id: str, force_whisper: bool = False, lang: Optional[str] = "auto"):
     """Returns timestamped synchronized lyrics for karaoke singing."""
     if not validate_video_id(video_id):
         raise HTTPException(status_code=400, detail="Invalid video ID")
-    return await asyncio.to_thread(fetch_lyrics_for_video, video_id, force_whisper, lang or "km")
+    return await asyncio.to_thread(fetch_lyrics_for_video, video_id, force_whisper, lang or "auto")
 
 
 @app.post("/api/lyrics/{video_id}")
 async def save_or_edit_lyrics(video_id: str, req: SaveLyricsRequest):
-    """Allows user to paste or edit lyrics directly for a song."""
+    """Allows user to paste or edit lyrics directly for a song, or trigger transcription."""
     if not validate_video_id(video_id):
         raise HTTPException(status_code=400, detail="Invalid video ID")
 
@@ -814,9 +1013,9 @@ async def save_or_edit_lyrics(video_id: str, req: SaveLyricsRequest):
     meta = read_metadata(video_id)
     duration = meta.get("duration", 240) or 240
 
-    # Case A: Re-transcribe with Whisper specifically
-    if req.force_whisper:
-        return await asyncio.to_thread(fetch_lyrics_for_video, video_id, True, req.language or "km")
+    # Case A: Re-transcribe with Whisper or language switch request
+    if req.force_whisper or (not req.lyrics and not req.raw_text):
+        return await asyncio.to_thread(fetch_lyrics_for_video, video_id, bool(req.force_whisper), req.language or "auto")
 
     # Case B: User submitted structured lyrics array
     if req.lyrics and isinstance(req.lyrics, list) and len(req.lyrics) > 0:
@@ -868,4 +1067,5 @@ if __name__ == "__main__":
     import uvicorn
     host = os.getenv("HOST", "0.0.0.0")
     port = int(os.getenv("PORT", "8000"))
-    uvicorn.run("main:app", host=host, port=port, reload=True)
+    logger.info(f"Starting server on {host}:{port}")
+    uvicorn.run(app, host=host, port=port)

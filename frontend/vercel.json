@@ -3,6 +3,14 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/api/:match*",
+      "destination": "https://ktv-backends.onrender.com/api/:match*"
+    },
+    {
+      "source": "/media/:match*",
+      "destination": "https://ktv-backends.onrender.com/media/:match*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

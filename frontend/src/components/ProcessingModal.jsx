@@ -73,57 +73,57 @@ export function ProcessingModal({
             <div className={`w-2 h-2 rounded-full ${
               progress >= 35 ? 'bg-emerald-400' : stage === 'downloading' ? 'bg-pink-400 animate-ping' : 'bg-slate-700'
             }`} />
-            <span>ជំហានទី ១: ទាញយកសំឡេងកម្រិតច្បាស់ពី YouTube ({progress >= 35 ? 'រួចរាល់' : 'កំពុងទាញយក...'})</span>
+            <span>ជំហានទី ១: Downloading audio... ({progress >= 35 ? 'រួចរាល់' : 'កំពុងទាញយក...'})</span>
           </div>
 
           <div className={`flex items-center gap-2.5 transition-colors ${
-            progress >= 75 ? 'text-emerald-400 font-medium' : stage === 'separating' ? 'text-purple-300 font-semibold' : 'text-slate-500'
+            progress >= 90 ? 'text-emerald-400 font-medium' : stage === 'separating' ? 'text-purple-300 font-semibold' : 'text-slate-500'
           }`}>
             <div className={`w-2 h-2 rounded-full ${
-              progress >= 75 ? 'bg-emerald-400' : stage === 'separating' ? 'bg-purple-400 animate-ping' : 'bg-slate-700'
+              progress >= 90 ? 'bg-emerald-400' : stage === 'separating' ? 'bg-purple-400 animate-ping' : 'bg-slate-700'
             }`} />
-            <span>ជំហានទី ២: កាត់សំឡេងច្រៀងចេញ 95%+ ដោយ AI Demucs Neural Network</span>
+            <span>ជំហានទី ២: Separating vocals with AI (Demucs Neural Network)</span>
           </div>
 
           <div className={`flex items-center gap-2.5 transition-colors ${
-            progress >= 98 ? 'text-emerald-400 font-medium' : stage === 'transcribing' ? 'text-cyan-300 font-semibold' : 'text-slate-500'
+            progress >= 95 ? 'text-emerald-400 font-medium' : stage === 'ready_to_sing' ? 'text-emerald-300 font-semibold' : 'text-slate-500'
           }`}>
             <div className={`w-2 h-2 rounded-full ${
-              progress >= 98 ? 'bg-emerald-400' : stage === 'transcribing' ? 'bg-cyan-400 animate-ping' : 'bg-slate-700'
+              progress >= 95 ? 'bg-emerald-400' : 'bg-slate-700'
             }`} />
-            <span>ជំហានទី ៣: AI Whisper ស្តាប់ & Transcribe អក្សរខ្មែរ (🇰🇭 Cambodia / Khmer)</span>
+            <span>ជំហានទី ៣: Vocal cut completed! Ready to sing / download instrumental.</span>
           </div>
 
           <div className={`flex items-center gap-2.5 transition-colors ${
             progress >= 100 ? 'text-emerald-400 font-bold' : 'text-slate-500'
           }`}>
             <div className={`w-2 h-2 rounded-full ${progress >= 100 ? 'bg-emerald-400' : 'bg-slate-700'}`} />
-            <span>ជំហានទី ៤: រួចរាល់ ១០០%! ចូលច្រៀងខារ៉ាអូខេភ្លាមៗជាមួយអក្សររត់</span>
+            <span>ជំហានទី ៤: រួចរាល់ ១០០%! ភ្លេងសុទ្ធ និងអក្សរចម្រៀងបានភ្ជាប់គ្នាជោគជ័យ</span>
           </div>
         </div>
 
-        {/* Instant Auto-Vocal Cut Option (ច្រៀងភ្លាមៗកាត់សម្លេងអូតូ មិនបាច់រង់ចាំ) */}
+        {/* Action Button: Check & Sing with Separated Instrumental */}
         {onStartInstantAutoVocalCut && (
           <div className="pt-1">
             <button
               onClick={onStartInstantAutoVocalCut}
               disabled={isInstantCutLoading}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold text-xs tracking-wide transition-all shadow-lg shadow-purple-500/30 cursor-pointer disabled:opacity-75"
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-pink-600 to-cyan-600 hover:from-purple-500 hover:to-pink-500 text-white font-bold text-xs tracking-wide transition-all shadow-lg shadow-purple-500/30 cursor-pointer disabled:opacity-75"
             >
               {isInstantCutLoading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
-                  <span>កំពុងរៀបចំសំឡេងភ្លាមៗ... (សូមរង់ចាំប្រហែល ២ វិនាទី)</span>
+                  <span>AI កំពុងបំបែកភ្លេងសុទ្ធ (Demucs AI Separation)... សូមរង់ចាំបន្តិច</span>
                 </>
               ) : (
                 <>
                   <Zap className="w-4 h-4 fill-current text-amber-300" />
-                  <span>⚡ ច្រៀងជាមួយ Auto Vocal Cut ភ្លាមៗ (កាត់សម្លេងច្រៀងអូតូ - មិនបាច់រង់ចាំ)</span>
+                  <span>⚡ ចូលច្រៀងភ្លាមៗជាមួយភ្លេងសុទ្ធ (Instrumental Track)</span>
                 </>
               )}
             </button>
             <p className="text-[11px] text-slate-400 mt-2">
-              អាចចូលច្រៀងភ្លាមៗជាមួយមុខងារកាត់សម្លេងច្រៀងអូតូ ខណៈពេល AI បន្តបំបែកភ្លេងសុទ្ធនៅខាងក្រោយ!
+              ភ្លេងសុទ្ធ (no_vocals.wav) ត្រូវបំបែកដាច់ពីសំឡេងច្រៀងដោយ AI Demucs 100%
             </p>
           </div>
         )}
